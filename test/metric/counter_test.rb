@@ -140,5 +140,25 @@ module PrometheusExporter::Metric
 
       assert_equal(counter.to_h, { sam: "ham" } => 5, { foo: "bar" } => 10)
     end
+
+    it "renders openmetrics counters with the _total family form" do
+      c = Counter.new("http_requests_total", "reqs")
+      c.observe(5, region: "eu")
+
+      text = <<~TEXT
+        # HELP http_requests reqs
+        # TYPE http_requests counter
+        http_requests_total{region="eu"} 5
+      TEXT
+
+      assert_equal(c.to_openmetrics_text, text)
+    end
+
+    it "appends _total to openmetrics counters that lack the suffix" do
+      counter.observe(3)
+
+      assert_includes(counter.to_openmetrics_text, "# TYPE a_counter counter")
+      assert_includes(counter.to_openmetrics_text, "a_counter_total 3")
+    end
   end
 end

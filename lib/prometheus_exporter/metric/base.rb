@@ -96,6 +96,13 @@ module PrometheusExporter::Metric
       TEXT
     end
 
+    # Legacy text is already valid OpenMetrics for gauges and summaries; only
+    # Counter (requires the `_total` family form) and Histogram (exemplars)
+    # override this.
+    def to_openmetrics_text
+      to_prometheus_text
+    end
+
     private
 
     def escape_value(str)

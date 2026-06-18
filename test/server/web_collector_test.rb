@@ -13,6 +13,8 @@ class PrometheusWebCollectorTest < Minitest::Test
 
   def teardown
     PrometheusExporter::Metric::Base.default_aggregation = nil
+    ENV.delete("HIST_ACTIONS")
+    ENV.delete("HIST_CONTROLLERS")
   end
 
   def collector
@@ -157,5 +159,59 @@ class PrometheusWebCollectorTest < Minitest::Test
       metrics_lines,
       "http_request_duration_seconds_bucket{controller=\"home\",action=\"index\",service=\"service1\",le=\"+Inf\"} 1\n",
     )
+  end
+
+  def web_payload(action:, controller:, total_duration:, account_tier: nil)
+    custom = { "service" => "service1" }
+    custom["account_tier"] = account_tier if account_tier
+    {
+      "type" => "web",
+      "status" => 200,
+      "timings" => { "total_duration" => total_duration },
+      "default_labels" => { "controller" => controller, "action" => action },
+      "custom_labels" => custom,
+    }
+  end
+
+  def test_histogram_off_by_default
+    collector.collect(web_payload(action: "index", controller: "home", total_duration: 0.1, account_tier: "xs"))
+
+    metrics = collector.metrics
+    metrics_text = metrics.map(&:metric_text).join
+
+    assert_equal 6, metrics.size
+    refute_includes metrics_text, "http_request_duration_seconds_hist"
+    # account_tier is stripped before the summary path regardless of the gate.
+    refute_includes metrics_text, "account_tier"
+  end
+
+  def test_histogram_emitted_and_gated_by_action
+    ENV["HIST_ACTIONS"] = "index"
+    collector.collect(web_payload(action: "index", controller: "home", total_duration: 0.1, account_tier: "xs"))
+    collector.collect(web_payload(action: "show", controller: "home", total_duration: 0.1, account_tier: "l"))
+
+    metrics_text = collector.metrics.map(&:metric_text).join
+
+    # index emitted with its tier on the histogram only...
+    assert_includes(
+      metrics_text,
+      "http_request_duration_seconds_hist_bucket{controller=\"home\",action=\"index\",service=\"service1\",account_tier=\"xs\",le=\"0.1\"} 1",
+    )
+    # ...show gated out of the histogram...
+    refute_includes metrics_text, "action=\"show\",service=\"service1\",account_tier"
+    # ...and the summary never carries account_tier.
+    refute_includes metrics_text, "http_request_duration_seconds{controller=\"home\",action=\"index\",service=\"service1\",account_tier"
+  end
+
+  def test_histogram_carries_exemplar_from_trace_id
+    ENV["HIST_ACTIONS"] = "index"
+    payload = web_payload(action: "index", controller: "home", total_duration: 0.2, account_tier: "xs")
+    payload["trace_id"] = "deadbeefcafe"
+    collector.collect(payload)
+
+    hist = collector.metrics.find { |m| m.name == "http_request_duration_seconds_hist" }
+    refute_nil hist
+    # value 0.2 lands in the le="0.2" bucket and carries the trace id as an exemplar.
+    assert_match(/le="0.2"\} 1 # \{traceID="deadbeefcafe"\}/, hist.to_openmetrics_text)
   end
 end

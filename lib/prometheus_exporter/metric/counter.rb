@@ -21,6 +21,19 @@ module PrometheusExporter::Metric
       @data.map { |labels, value| "#{prefix(@name)}#{labels_text(labels)} #{value}" }.join("\n")
     end
 
+    # OpenMetrics counters: the TYPE/HELP family name must NOT carry the `_total`
+    # suffix, while every sample must. (Legacy text keeps `_total` on the family.)
+    def to_openmetrics_text
+      family = @name.end_with?("_total") ? @name[0...-"_total".length] : @name
+      family = prefix(family)
+      body = @data.map { |labels, value| "#{family}_total#{labels_text(labels)} #{value}" }.join("\n")
+      <<~TEXT
+        # HELP #{family} #{help}
+        # TYPE #{family} counter
+        #{body}
+      TEXT
+    end
+
     def to_h
       @data.dup
     end

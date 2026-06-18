@@ -26,6 +26,8 @@ module PrometheusExporter::Metric
       @sums = {}
       @counts = {}
       @observations = {}
+      # Most-recent exemplar per (labels, bucket); only rendered in OpenMetrics mode.
+      @exemplars = {}
     end
 
     def to_h
@@ -42,6 +44,7 @@ module PrometheusExporter::Metric
       @observations.delete(labels)
       @counts.delete(labels)
       @sums.delete(labels)
+      @exemplars.delete(labels)
     end
 
     def type
@@ -67,7 +70,9 @@ module PrometheusExporter::Metric
       text
     end
 
-    def observe(value, labels = nil)
+    # exemplar is positional (not a kwarg) so braceless-hash label calls such as
+    # `observe(0.1, name: "bob")` keep binding to `labels`, not to a keyword.
+    def observe(value, labels = nil, exemplar = nil)
       labels ||= {}
       buckets = ensure_histogram(labels)
 
@@ -76,6 +81,7 @@ module PrometheusExporter::Metric
       @counts[labels] += 1
 
       fill_buckets(value, buckets)
+      store_exemplar(value, labels, exemplar) if exemplar
     end
 
     def ensure_histogram(labels)
@@ -98,6 +104,39 @@ module PrometheusExporter::Metric
 
     def with_bucket(labels, bucket)
       labels.merge("le" => bucket)
+    end
+
+    # OpenMetrics rendering — identical to metric_text but bucket lines may carry
+    # an exemplar (`# {traceID="..."} value timestamp`). Counters/gauges/summaries
+    # need no special form, so only Histogram and Counter override this.
+    def to_openmetrics_text
+      name = prefix(@name)
+      text = +"# HELP #{name} #{@help}\n# TYPE #{name} histogram\n"
+      @observations.each do |labels, _buckets|
+        count = @counts[labels]
+        @buckets.each do |bucket|
+          text << bucket_line(name, labels, bucket, @observations[labels][bucket])
+        end
+        text << bucket_line(name, labels, "+Inf", count)
+        text << "#{name}_count#{labels_text(labels)} #{count}\n"
+        text << "#{name}_sum#{labels_text(labels)} #{@sums[labels]}\n"
+      end
+      text
+    end
+
+    private
+
+    def store_exemplar(value, labels, trace_id)
+      key = @buckets.find { |b| value <= b } || "+Inf"
+      (@exemplars[labels] ||= {})[key] = { trace_id: trace_id, value: value, ts: Time.now.to_f }
+    end
+
+    def bucket_line(name, labels, bucket, value)
+      line = +"#{name}_bucket#{labels_text(with_bucket(labels, bucket.to_s))} #{value}"
+      if (ex = @exemplars.dig(labels, bucket))
+        line << " # {traceID=\"#{ex[:trace_id]}\"} #{ex[:value]} #{format("%.3f", ex[:ts])}"
+      end
+      line << "\n"
     end
   end
 end

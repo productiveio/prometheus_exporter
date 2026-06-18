@@ -1,0 +1,43 @@
+version: v1.0
+name: Build & push prometheus_exporter image
+agent:
+  machine:
+    type: f1-standard-2
+    os_image: ubuntu2404
+
+global_job_config:
+  prologue:
+    commands:
+      - checkout
+      - source bin/generate_aws_credentials.sh
+  secrets:
+    - name: dockerhub
+  env_vars:
+    - name: AWS_ROLE
+      value: semaphore-build-role
+    - name: ECR_ACCOUNT
+      value: 013323007402.dkr.ecr.eu-west-1.amazonaws.com
+    - name: REPOSITORY
+      value: productiveio
+
+blocks:
+  - name: Build & push multi-arch
+    task:
+      jobs:
+        - name: buildx push
+          commands:
+            # Builds the complete exporter image (FROM productiveio/ruby, gem from
+            # this repo's source) and publishes the multi-arch `prometheus_exporter`
+            # image the api ECS task definition consumes (ECR_ACCOUNT/prometheus_exporter:latest).
+            - echo "${DOCKERHUB_PASSWORD}" | docker login -u "${REPOSITORY}" --password-stdin
+            - aws ecr get-login-password --region eu-west-1 | docker login --username AWS --password-stdin "${ECR_ACCOUNT}"
+            - docker run --privileged --rm tonistiigi/binfmt --install all
+            - docker buildx create --use --name builder
+            - >
+              docker buildx build
+              --platform linux/amd64,linux/arm64
+              --provenance=false --pull --push
+              -t "${ECR_ACCOUNT}/prometheus_exporter:latest"
+              -t "${ECR_ACCOUNT}/prometheus_exporter:${SEMAPHORE_GIT_SHA}"
+              -t "${REPOSITORY}/prometheus_exporter:latest"
+              .

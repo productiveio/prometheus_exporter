@@ -62,6 +62,14 @@ module PrometheusExporter::Server
 
       @collector = opts[:collector] || Collector.new(logger: @logger)
 
+      # Custom collectors may still define `prometheus_metrics_text` with no args
+      # (the legacy CollectorBase interface); only pass `openmetrics:` when supported.
+      @collector_accepts_openmetrics =
+        @collector
+          .method(:prometheus_metrics_text)
+          .parameters
+          .any? { |type, name| type == :keyrest || name == :openmetrics }
+
       webrick_options = { Port: @port, BindAddress: @bind, Logger: @logger, AccessLog: @access_log }
 
       if opts[:tls_cert_file] && opts[:tls_key_file]
@@ -83,9 +91,15 @@ module PrometheusExporter::Server
           authenticate(req, res) if @auth
 
           res.status = 200
+          # Prometheus advertises OpenMetrics via Accept when exemplar-storage
+          # scraping is on; only then do we emit exemplars + `# EOF`.
+          openmetrics = req["accept"].to_s.include?("application/openmetrics-text")
+          if openmetrics
+            res["Content-Type"] = "application/openmetrics-text; version=1.0.0; charset=utf-8"
+          end
           if req.header["accept-encoding"].to_s.include?("gzip")
             sio = StringIO.new
-            collected_metrics = metrics
+            collected_metrics = metrics(openmetrics: openmetrics)
             begin
               writer = Zlib::GzipWriter.new(sio)
               writer.write(collected_metrics)
@@ -95,7 +109,7 @@ module PrometheusExporter::Server
             res.body = sio.string
             res.header["content-encoding"] = "gzip"
           else
-            res.body = metrics
+            res.body = metrics(openmetrics: openmetrics)
           end
         elsif req.path == "/send-metrics"
           handle_metrics(req, res)
@@ -143,10 +157,17 @@ module PrometheusExporter::Server
       @server.shutdown
     end
 
-    def metrics
+    def metrics(openmetrics: false)
       metric_text = nil
       begin
-        Timeout.timeout(@timeout) { metric_text = @collector.prometheus_metrics_text }
+        Timeout.timeout(@timeout) do
+          metric_text =
+            if @collector_accepts_openmetrics
+              @collector.prometheus_metrics_text(openmetrics: openmetrics)
+            else
+              @collector.prometheus_metrics_text
+            end
+        end
       rescue Timeout::Error
         # we timed out ... bummer
         @logger.error "Generating Prometheus metrics text timed out"
@@ -166,10 +187,19 @@ module PrometheusExporter::Server
       metrics << @sessions_total
       metrics << @bad_metrics_total
 
-      <<~TEXT
-      #{metrics.map(&:to_prometheus_text).join("\n\n")}
-      #{metric_text}
-      TEXT
+      internal = metrics.map { |m| openmetrics ? m.to_openmetrics_text : m.to_prometheus_text }
+
+      body = +"#{internal.join("\n\n")}\n#{metric_text}\n"
+
+      if openmetrics
+        # OpenMetrics forbids blank lines (the legacy text parser tolerates them)
+        # and the document MUST terminate with a single `# EOF`.
+        body = body.gsub(/\n{2,}/, "\n").sub(/\A\n+/, "")
+        body << "\n" unless body.end_with?("\n")
+        body << "# EOF\n"
+      end
+
+      body
     end
 
     def get_rss

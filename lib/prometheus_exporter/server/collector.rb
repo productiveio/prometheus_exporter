@@ -62,11 +62,11 @@ module PrometheusExporter::Server
       end
     end
 
-    def prometheus_metrics_text
+    def prometheus_metrics_text(openmetrics: false)
       @mutex.synchronize do
-        (@metrics.values + @collectors.values.map(&:metrics).flatten).map(
-          &:to_prometheus_text
-        ).join("\n")
+        (@metrics.values + @collectors.values.map(&:metrics).flatten).map do |m|
+          openmetrics ? m.to_openmetrics_text : m.to_prometheus_text
+        end.join("\n")
       end
     end
 

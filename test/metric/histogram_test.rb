@@ -179,5 +179,23 @@ module PrometheusExporter::Metric
 
       assert_equal(histogram.buckets, buckets)
     end
+
+    it "renders an exemplar on the matching bucket in openmetrics mode" do
+      histogram.observe(0.2, { "controller" => "tasks" }, "abc123")
+
+      text = histogram.to_openmetrics_text
+      # value 0.2 lands in the le="0.25" bucket; only that bucket carries it.
+      assert_match(
+        %r{a_histogram_bucket\{controller="tasks",le="0.25"\} 1 # \{traceID="abc123"\} 0.2 \d+\.\d{3}\n},
+        text,
+      )
+      assert_match(/a_histogram_bucket\{controller="tasks",le="0.1"\} 0\n/, text)
+    end
+
+    it "omits the exemplar suffix when none was recorded" do
+      histogram.observe(0.2, { "controller" => "tasks" })
+
+      refute_includes(histogram.to_openmetrics_text, "traceID")
+    end
   end
 end

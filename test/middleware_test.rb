@@ -88,6 +88,20 @@ class PrometheusExporterMiddlewareTest < Minitest::Test
     assert_invalid_headers_response
   end
 
+  def test_includes_trace_id_when_present_in_env
+    configure_middleware
+    get "/", {}, { "prometheus.trace_id" => "deadbeefcafe" }
+    assert last_response.ok?
+    assert_equal "deadbeefcafe", client.last_send[:trace_id]
+  end
+
+  def test_omits_trace_id_when_absent_from_env
+    configure_middleware
+    get "/"
+    assert last_response.ok?
+    refute client.last_send.key?(:trace_id)
+  end
+
   def test_redis_5_call_patching
     RedisValidationMiddleware.reset!
     configure_middleware

@@ -70,6 +70,11 @@ class PrometheusExporter::Middleware
     labels = custom_labels(env)
     obj = obj.merge(custom_labels: labels) if labels
 
+    # Optional exemplar trace id (set upstream, e.g. from the current OTel span);
+    # rendered on histogram buckets when the server emits OpenMetrics.
+    trace_id = env["prometheus.trace_id"]
+    obj = obj.merge(trace_id: trace_id) if trace_id
+
     @client.send_json(obj)
   end
 

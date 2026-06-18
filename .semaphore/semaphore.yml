@@ -1,0 +1,25 @@
+version: v1.0
+name: prometheus_exporter (Productive fork)
+agent:
+  machine:
+    type: f1-standard-2
+    os_image: ubuntu2404
+
+# This config lives only on the `productive` branch; upstream `main` keeps no CI
+# of ours. Tests run on every push; the image build is promoted on `productive`.
+blocks:
+  - name: Test
+    task:
+      jobs:
+        - name: rake test
+          commands:
+            - checkout
+            - sem-version ruby 4.0.3
+            - bundle install --path vendor/bundle
+            - bundle exec rake test
+
+promotions:
+  - name: Build & push image
+    pipeline_file: deploy/image.yml
+    auto_promote:
+      when: "result = 'passed' and branch = 'productive'"
