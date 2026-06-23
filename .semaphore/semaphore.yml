@@ -5,10 +5,13 @@ agent:
     type: f1-standard-2
     os_image: ubuntu2404
 
-# This config lives only on the `productive` branch; upstream `main` keeps no CI
-# of ours. Tests run on every push; the image build is promoted on `productive`.
+# This config lives only on the `productive` branch (the default), which upstream
+# `main` doesn't carry. The pipeline only runs on `productive`; the image build is
+# promoted from there.
 blocks:
   - name: Test
+    run:
+      when: "branch = 'productive'"
     task:
       jobs:
         - name: rake test
