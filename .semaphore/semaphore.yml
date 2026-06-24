@@ -18,7 +18,8 @@ blocks:
           commands:
             - checkout
             - sem-version ruby 4.0.3
-            - bundle install --path vendor/bundle
+            - bundle config set path 'vendor/bundle'
+            - bundle install
             - bundle exec rake test
 
 promotions:
