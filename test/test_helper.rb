@@ -4,6 +4,7 @@ $LOAD_PATH.unshift File.expand_path("../../lib", __FILE__)
 require "prometheus_exporter"
 
 require "minitest/autorun"
+require "minitest/mock"
 require "ostruct"
 require "redis"
 
