@@ -11,7 +11,9 @@ agent:
 blocks:
   - name: Test
     run:
-      when: "branch = 'productive'"
+      # slim-image-test added temporarily so the multi-stage image build can be
+      # validated from that branch; remove it before/at merge to keep productive-only.
+      when: "branch = 'productive' OR branch = 'slim-image-test'"
     task:
       jobs:
         - name: rake test
@@ -26,4 +28,4 @@ promotions:
   - name: Build & push image
     pipeline_file: deploy/image.yml
     auto_promote:
-      when: "result = 'passed' and branch = 'productive'"
+      when: "result = 'passed' and (branch = 'productive' OR branch = 'slim-image-test')"
