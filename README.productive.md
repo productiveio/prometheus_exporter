@@ -34,6 +34,7 @@ is still emitted exactly as before. The histogram is purely additive.
 |--------------------|-------------------------------------------------------------------------|
 | `HIST_ACTIONS`     | comma-list of actions to emit for, e.g. `index`. **Empty = OFF** (no histogram). |
 | `HIST_CONTROLLERS` | comma-list of controllers to restrict to. Empty = all controllers for the allowed actions. |
+| `HIST_EXEMPLAR_MIN_SECONDS` | attach an exemplar only to requests at/above this duration. Default `1.0`; `0` = every request. Keeps the fast, high-volume buckets from burying the slow tail. |
 
 Both gates are **AND**ed: a request is recorded only if its `action` is in
 `HIST_ACTIONS` **and** (`HIST_CONTROLLERS` is empty **or** its `controller` is listed).
@@ -95,7 +96,8 @@ The `# {traceID="…"} <value> <ts>` suffix is the exemplar.
   header automatically when scraped with `--enable-feature=exemplar-storage`; the plain
   text format never carries exemplars.
 - The trace id comes from the **top-level `trace_id`** key of the web payload (it is NOT
-  a label). One most-recent exemplar is kept per (series, bucket).
+  a label). One most-recent exemplar is kept per (series, bucket), and only for requests
+  at/above `HIST_EXEMPLAR_MIN_SECONDS` (default 1s) — so fast buckets stay exemplar-free.
 - The exemplar label is named `traceID` to match the Mimir → Tempo
   `exemplarTraceIdDestinations` wiring.
 

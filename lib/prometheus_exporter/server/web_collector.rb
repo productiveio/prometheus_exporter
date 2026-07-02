@@ -21,6 +21,10 @@ module PrometheusExporter::Server
       # actions/controllers, so it can be rolled out one endpoint at a time.
       @hist_actions = (ENV["HIST_ACTIONS"] || "").split(",").map(&:strip).reject(&:empty?)
       @hist_controllers = (ENV["HIST_CONTROLLERS"] || "").split(",").map(&:strip).reject(&:empty?)
+      # Exemplars are attached only to requests at/above this duration, so the
+      # fast, high-volume buckets don't bury the slow tail we actually want to
+      # trace. Tune via env; 0 attaches an exemplar to every request.
+      @hist_exemplar_min = (ENV["HIST_EXEMPLAR_MIN_SECONDS"] || "1.0").to_f
     end
 
     def type
@@ -126,10 +130,11 @@ module PrometheusExporter::Server
             buckets: HISTOGRAM_BUCKETS,
           )
 
+      exemplar = trace_id if trace_id && duration >= @hist_exemplar_min
       @http_request_duration_seconds_hist.observe(
         duration,
         labels.merge("account_tier" => account_tier || "unknown"),
-        trace_id,
+        exemplar,
       )
     end
   end
