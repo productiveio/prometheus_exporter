@@ -15,6 +15,7 @@ class PrometheusWebCollectorTest < Minitest::Test
     PrometheusExporter::Metric::Base.default_aggregation = nil
     ENV.delete("HIST_ACTIONS")
     ENV.delete("HIST_CONTROLLERS")
+    ENV.delete("HIST_EXEMPLAR_MIN_SECONDS")
   end
 
   def collector
@@ -205,6 +206,7 @@ class PrometheusWebCollectorTest < Minitest::Test
 
   def test_histogram_carries_exemplar_from_trace_id
     ENV["HIST_ACTIONS"] = "index"
+    ENV["HIST_EXEMPLAR_MIN_SECONDS"] = "0" # attach regardless of duration for this test
     payload = web_payload(action: "index", controller: "home", total_duration: 0.2, account_tier: "xs")
     payload["trace_id"] = "deadbeefcafe"
     collector.collect(payload)
@@ -213,5 +215,25 @@ class PrometheusWebCollectorTest < Minitest::Test
     refute_nil hist
     # value 0.2 lands in the le="0.2" bucket and carries the trace id as an exemplar.
     assert_match(/le="0.2"\} 1 # \{traceID="deadbeefcafe"\}/, hist.to_openmetrics_text)
+  end
+
+  def test_exemplar_gated_by_latency_threshold
+    ENV["HIST_ACTIONS"] = "index"
+    ENV["HIST_EXEMPLAR_MIN_SECONDS"] = "1.0"
+
+    fast = web_payload(action: "index", controller: "home", total_duration: 0.2, account_tier: "xs")
+    fast["trace_id"] = "fasttrace"
+    collector.collect(fast)
+
+    slow = web_payload(action: "index", controller: "home", total_duration: 2, account_tier: "xs")
+    slow["trace_id"] = "slowtrace"
+    collector.collect(slow)
+
+    text = collector.metrics.find { |m| m.name == "http_request_duration_seconds_hist" }.to_openmetrics_text
+
+    # the slow request (>= 1s) carries its trace as an exemplar...
+    assert_match(/le="2"\} \d+ # \{traceID="slowtrace"\}/, text)
+    # ...the sub-threshold request does not, so fast buckets stay clean.
+    refute_match(/traceID="fasttrace"/, text)
   end
 end
