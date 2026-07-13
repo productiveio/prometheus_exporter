@@ -5,8 +5,8 @@
 # a human-readable audit trail + rollback aid (roll back stable by re-pointing its
 # tag at the previous digest recorded here). Run LAST in the weekly pipeline.
 #
-# Uploaded as a Semaphore workflow artifact by default; set COMMIT_CHANNELS=true
-# (and give the checkout push access) to also commit it back for git history.
+# Uploaded as a Semaphore workflow artifact (one per run), so the per-run history
+# lives in the artifact store; the file is not committed back.
 #
 set -o pipefail
 
@@ -34,16 +34,4 @@ cat "$OUT"
 
 if command -v artifact >/dev/null 2>&1; then
   artifact push workflow "$OUT" --force || echo "--> artifact push skipped"
-fi
-
-if [ "${COMMIT_CHANNELS}" = "true" ]; then
-  git config user.email "ci@productive.io"
-  git config user.name "Semaphore CI"
-  if ! git diff --quiet -- "$OUT"; then
-    git add "$OUT"
-    git commit -m "chore: update channels.json [skip ci]"
-    git push origin "HEAD:${SEMAPHORE_GIT_BRANCH:-productive}" || echo "--> commit-back push failed (needs write access)"
-  else
-    echo "--> channels.json unchanged, nothing to commit"
-  fi
 fi

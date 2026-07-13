@@ -23,9 +23,6 @@ global_job_config:
     # Set to "true" on the task to skip the weekly latest->stable promotion.
     - name: PROMOTION_HOLD
       value: "false"
-    # Set to "true" to also commit channels.json back (needs push access).
-    - name: COMMIT_CHANNELS
-      value: "false"
 
 blocks:
   # Runs first, before the rebuild overwrites latest: copies the current latest
