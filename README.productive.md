@@ -17,6 +17,45 @@ is still emitted exactly as before. The histogram is purely additive.
 
 ---
 
+## Release channels
+
+The exporter image is `FROM productiveio/ruby`, so it inherits the same unattended
+base-image drift as everything else. It follows the **same latest/stable model** as
+`productiveio/docker-images`:
+
+| Channel | Points at | Consumed by |
+| --- | --- | --- |
+| **latest** | the image built this Sunday (fresh) | api staging / `latest` exporter sidecar |
+| **stable** | what `latest` was **last** Sunday (soaked a week) | edge / prod / sandbox exporter sidecar |
+
+- Per-push builds on `productive` still publish `prometheus_exporter:latest` (+ git sha)
+  via `.semaphore/deploy/image.yml` — that's how code changes ship.
+- A weekly job (`.semaphore/deploy/weekly_image.yml`) **promotes `latest` → `stable`
+  first** (registry-side copy, no rebuild), then rebuilds `latest` on the fresh ruby
+  base and records digests in [`channels.json`](./channels.json). So `stable` trails
+  `latest` by a week; staging runs `latest` for a week before it becomes `stable`.
+
+### Setting up the scheduled task (Semaphore)
+
+There is **no** scheduled task on this project yet — create one to match docker-images:
+
+- **Project:** `prometheus_exporter`
+- **Name:** `Weekly prometheus_exporter rebuild`
+- **Branch:** `productive`
+- **Pipeline file:** `.semaphore/deploy/weekly_image.yml`
+- **Schedule (cron):** `0 4 * * 0` — Sundays 04:00, a couple of hours **after** the
+  docker-images weekly job (Sundays 02:00) so it builds on the freshly rebuilt ruby.
+
+### Break-glass
+
+- **Hold a promotion:** set `PROMOTION_HOLD=true` on the task.
+- **Rollback stable:** re-point the stable tag at the previous digest from `channels.json`:
+  `docker buildx imagetools create -t <ECR>/prometheus_exporter:stable <ECR>/prometheus_exporter@sha256:<prev>`
+- Prod/edge/sandbox ECS task defs should pin `prometheus_exporter:stable` (follow-up in
+  the api repo); staging stays on `:latest`.
+
+---
+
 ## The histogram
 
 - **Metric:** `http_request_duration_seconds_hist` (alongside the `…_seconds` summary).
