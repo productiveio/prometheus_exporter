@@ -25,31 +25,28 @@ base-image drift as everything else. It follows the **same latest/stable model**
 
 | Channel | Points at | Consumed by |
 | --- | --- | --- |
-| **latest** | the image built this Sunday (fresh) | api staging / `latest` exporter sidecar |
-| **stable** | what `latest` was **last** Sunday (soaked a week) | edge / prod / sandbox exporter sidecar |
+| **latest** | freshly built | api staging / `latest` exporter sidecar |
+| **stable** | last week's `latest` (soaked a week) | edge / prod / sandbox exporter sidecar |
 
-- Per-push builds on `productive` still publish `prometheus_exporter:latest` (+ git sha)
-  via `.semaphore/deploy/image.yml` — that's how code changes ship.
-- A weekly job (`.semaphore/deploy/weekly_image.yml`) **promotes `latest` → `stable`
-  first** (registry-side copy, no rebuild), then rebuilds `latest` on the fresh ruby
-  base and records digests in [`channels.json`](./channels.json). So `stable` trails
-  `latest` by a week; staging runs `latest` for a week before it becomes `stable`.
+Two things build this image:
 
-### Setting up the scheduled task (Semaphore)
+- **This repo, per push to `productive`** (`.semaphore/deploy/image.yml`): run the
+  tests, then build + push `prometheus_exporter:latest` (+ git sha). That's how code
+  changes ship an image immediately.
+- **`productiveio/docker-images`, weekly** (Sundays 02:00): after rebuilding the ruby
+  base, its pipeline clones this repo and rebuilds the exporter on the *fresh* ruby,
+  promotes the previous `latest` → `stable`, and records the digests in that repo's
+  `channels.json`.
 
-There is **no** scheduled task on this project yet — create one to match docker-images:
+The weekly rebuild **and** the latest→stable promotion live in docker-images (one
+pipeline for every base image, no cross-repo schedule race), so there is **no
+scheduled task and no promotion/channels logic in this repo**.
 
-- **Project:** `prometheus_exporter`
-- **Name:** `Weekly prometheus_exporter rebuild`
-- **Branch:** `productive`
-- **Pipeline file:** `.semaphore/deploy/weekly_image.yml`
-- **Schedule (cron):** `0 4 * * 0` — Sundays 04:00, a couple of hours **after** the
-  docker-images weekly job (Sundays 02:00) so it builds on the freshly rebuilt ruby.
+### Break-glass (managed in docker-images)
 
-### Break-glass
-
-- **Hold a promotion:** set `PROMOTION_HOLD=true` on the task.
-- **Rollback stable:** re-point the stable tag at the previous digest from `channels.json`:
+- **Hold a promotion:** set `PROMOTION_HOLD=true` on the docker-images weekly task.
+- **Rollback stable:** re-point the tag at the previous digest from docker-images'
+  `channels.json`:
   `docker buildx imagetools create -t <ECR>/prometheus_exporter:stable <ECR>/prometheus_exporter@sha256:<prev>`
 - Prod/edge/sandbox ECS task defs should pin `prometheus_exporter:stable` (follow-up in
   the api repo); staging stays on `:latest`.
