@@ -35,15 +35,25 @@ FROM public.ecr.aws/amazonlinux/amazonlinux:2023
 
 ARG VERSION
 
-# Runtime shared libs the Ruby interpreter links against (openssl, libyaml for psych).
+# Runtime deps:
+#  - openssl, libyaml: shared libs the Ruby interpreter links against (libyaml for psych)
+#  - jemalloc: LD_PRELOAD'd below to keep the exporter's RSS under the sidecar's tight
+#    memory limit. The heavy productiveio/ruby base provided this; the slim AL2023
+#    runtime must add it back, otherwise glibc malloc fragmentation grows the process
+#    until the OOM killer reaps it (~every 20 min) and the container restart-loops.
 RUN yum upgrade -y && \
-    yum install -y openssl libyaml && \
+    yum install -y openssl libyaml jemalloc && \
     yum clean all -y && \
     rm -rf /var/cache/yum
 
 COPY --from=build /usr/local/rvm/rubies/ruby-${VERSION} /usr/local/rvm/rubies/ruby-${VERSION}
+COPY --chmod=0755 docker/exporter-entrypoint.sh /usr/local/bin/exporter-entrypoint
 
-ENV PATH="/usr/local/rvm/rubies/ruby-${VERSION}/bin:${PATH}"
+ENV PATH="/usr/local/rvm/rubies/ruby-${VERSION}/bin:${PATH}" \
+    LD_PRELOAD="/usr/lib64/libjemalloc.so.2"
 
 EXPOSE 9394
-ENTRYPOINT ["prometheus_exporter","--verbose","-b","ANY","-t","10"]
+# Wrap the exporter so SIGTERM/SIGINT produce a clean exit 0 (see the shim). The gem's
+# own exe/prometheus_exporter is left untouched so the fork stays in sync with upstream.
+ENTRYPOINT ["/usr/local/bin/exporter-entrypoint"]
+CMD ["prometheus_exporter", "--verbose", "-b", "ANY", "-t", "10"]
